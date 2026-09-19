@@ -1,0 +1,46 @@
+# Gömülü yedek menüyü her gün Google Sheets'ten tazeler.
+#
+# NEDEN: Sayfa açılırken önce içine gömülü menüyü basar, sonra Sheets'i
+# çekip yeniden basar. Sheets'e erişilemezse gömülü menü ekranda kalır.
+# O yedek tazelenmezse, Sheets'in çöktüğü gün müşteriye aylar önceki
+# fiyat gösterilir. Bu görev yedeği güncel tutar.
+#
+# Elle çalıştırmak için: Actions sekmesi -> bu görev -> "Run workflow"
+
+name: Gömülü yedeği tazele
+
+on:
+  schedule:
+    # 03:00 UTC = 06:00 Türkiye. Restoran açılmadan önce.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tazele:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PHP ve curl var mı
+        run: |
+          php -v
+          php -m | grep -qi '^curl$' || { echo "PHP curl eklentisi yok"; exit 1; }
+
+      - name: Yedeği tazele
+        run: php arac/yedek-tazele.php index.html
+
+      - name: Değiştiyse commit et
+        run: |
+          if git diff --quiet index.html; then
+            echo "Değişiklik yok, commit atlanıyor."
+            exit 0
+          fi
+          git config user.name "yedek-tazele"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Gömülü yedek tazelendi (otomatik)"
+          git push
