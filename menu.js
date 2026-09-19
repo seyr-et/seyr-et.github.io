@@ -1,7 +1,15 @@
 /* =====================================================================
    Seyr-et QR Menü — statik sürüm
-   Menü önce sayfaya gömülü veriden basılır (anında görünür), sonra
-   Google Sheets'ten güncel veri çekilip varsa yeniden basılır.
+
+   Veri akışı: sayfa açılınca yer tutucu basılır ve Google Sheets'ten
+   güncel menü çekilir. Fiyat ekrana YALNIZCA BİR KEZ, doğru haliyle
+   gelir. Tabloya 4 saniyede ulaşılamazsa sayfaya gömülü yedek menü
+   basılır — menü asla boş açılmaz.
+
+   Gömülü yedek neden açılışta basılmıyor: önceden basılıyordu ve tablo
+   gelince üzerine yazılıyordu. Fiyat değiştikten sonraki ilk gün bu,
+   eski fiyatın ~1 saniye ekranda kalması demekti. Menüde yanlış fiyat
+   yarım saniye bile görünmemeli.
    ===================================================================== */
 (function () {
     "use strict";
@@ -39,6 +47,7 @@
     function menuyuBas(veri) {
         var kap = document.getElementById("menu");
         if (!kap || !veri || !veri.kategoriler) { return; }
+        kap.removeAttribute("aria-busy");
 
         // Acik olan kategoriyi hatirla ki yeniden basinca kapanmasin
         var acikOlan = null;
@@ -103,6 +112,34 @@
             window.scrollTo({ top: ust, behavior: "smooth" });
         }
     });
+
+    // -----------------------------------------------------------------
+    // Yukleniyor yer tutucusu
+    // -----------------------------------------------------------------
+    // Tablo gelene kadar basilir. Bilerek fiyat/ad icermiyor — amac zaten
+    // eski bir fiyatin goz onune gelmesini engellemek.
+    function iskeletBas(adet) {
+        var kap = document.getElementById("menu");
+        if (!kap) { return; }
+        var n = Math.min(Math.max(adet || 6, 3), 8);
+        var html = "";
+        for (var i = 0; i < n; i++) {
+            html += '<div class="iskelet" aria-hidden="true"></div>';
+        }
+        // Ekran okuyucu bos alan yerine durumu duysun
+        kap.setAttribute("aria-busy", "true");
+        kap.innerHTML = html;
+    }
+
+    // Ne tablo ne de gomulu yedek varsa (beklenmeyen durum) bos ekran
+    // birakmak yerine ne oldugunu soyle.
+    function hataBas() {
+        var kap = document.getElementById("menu");
+        if (!kap) { return; }
+        kap.removeAttribute("aria-busy");
+        kap.innerHTML = '<p class="menu-hata">Menü şu anda yüklenemedi. ' +
+            'Lütfen sayfayı yenileyin.</p>';
+    }
 
     // -----------------------------------------------------------------
     // CSV okuma  (tirnak icindeki virgul ve satir sonlarini destekler)
@@ -181,7 +218,6 @@
     } catch (e) {
         console.error("Gömülü menü okunamadı", e);
     }
-    if (gomulu) { menuyuBas(gomulu); }
 
     // Kategori adi -> gorsel eslesmesi, gomulu veriden
     var gorselHaritasi = {};
@@ -189,12 +225,37 @@
         gomulu.kategoriler.forEach(function (k) { gorselHaritasi[k.ad] = k.gorsel; });
     }
 
-    // Sheets'ten guncel veri. Basarisiz olursa gomulu menu ekranda kalir.
     // Canlıda yalnızca https kabul edilir (karışık içerik uyarısı çıkmasın).
     // Yerel testte http'ye de izin veriliyor.
     var yerelMi = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
     var kaynak = window.MENU_KAYNAGI;
-    if (kaynak && (/^https:\/\//.test(kaynak) || (yerelMi && /^https?:\/\//.test(kaynak)))) {
+    var canliVar = !!kaynak &&
+        (/^https:\/\//.test(kaynak) || (yerelMi && /^https?:\/\//.test(kaynak)));
+
+    // Tablo bu sureden uzun sürerse gomulu yedege dusulur. Bilerek genis:
+    // yedegin isi "Sheets erisilemiyor" durumu, "Sheets yavas" durumu degil.
+    var YEDEGE_DUSME_MS = 4000;
+
+    if (!canliVar) {
+        // Sheets bagli degil — gomulu menu tek kaynak.
+        if (gomulu) { menuyuBas(gomulu); }
+    } else {
+        // ÖNEMLİ: gomulu menu burada BASILMIYOR.
+        // Eskiden once gomulu basiliyor, tablo gelince uzerine yaziliyordu.
+        // Fiyat degistikten sonraki ilk gun bu, ~0.5-1 sn boyunca ESKI
+        // FIYATIN ekranda durmasi demekti. Musterinin yanlis fiyat gormesi,
+        // yarim saniye bile olsa kabul edilemez. Artik yer tutucu basiliyor;
+        // fiyat yalnizca bir kez, dogru haliyle ekrana geliyor.
+        iskeletBas(gomulu ? gomulu.kategoriler.length : 6);
+
+        var basildi = false;
+        var yedekZamanlayici = setTimeout(function () {
+            if (basildi || !gomulu) { return; }
+            basildi = true;
+            menuyuBas(gomulu);
+            console.warn("Tablo " + YEDEGE_DUSME_MS + " ms icinde gelmedi, gomulu yedek basildi.");
+        }, YEDEGE_DUSME_MS);
+
         fetch(kaynak, { cache: "no-store" })
             .then(function (y) {
                 if (!y.ok) { throw new Error("HTTP " + y.status); }
@@ -202,12 +263,25 @@
             })
             .then(function (csv) {
                 var yeni = tablodanMenu(csvCoz(csv), gorselHaritasi);
-                if (yeni && yeni.kategoriler.length) {
-                    menuyuBas(yeni);
-                    console.log("Menü Sheets'ten güncellendi.");
-                }
+                if (!yeni || !yeni.kategoriler.length) { throw new Error("tabloda gecerli satir yok"); }
+                clearTimeout(yedekZamanlayici);
+                // Yedek zaten basildiysa bile guncel veriyle degistiriliyor:
+                // o noktada secim "bir kerelik degisim" ile "ziyaret boyunca
+                // yanlis fiyat" arasinda, dogru fiyat kazanir.
+                menuyuBas(yeni);
+                basildi = true;
+                console.log("Menü Sheets'ten güncellendi.");
             })
             .catch(function (e) {
+                clearTimeout(yedekZamanlayici);
+                if (!basildi) {
+                    basildi = true;
+                    if (gomulu) {
+                        menuyuBas(gomulu);
+                    } else {
+                        hataBas();
+                    }
+                }
                 console.warn("Sheets okunamadı, gömülü menü kullanılıyor:", e.message);
             });
     }

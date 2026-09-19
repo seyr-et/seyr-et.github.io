@@ -147,6 +147,60 @@ body {
     max-width: 680px;
 }
 
+/* ---- Yükleniyor yer tutucusu -------------------------------------- */
+/* Tablo gelene kadar basılır. Fiyat göstermiyor: eski bir fiyatı yarım
+   saniye bile göstermek, biraz beklemekten kötü. Kategori kartıyla aynı
+   ölçüde ki menü gelince sayfa zıplamasın. */
+.iskelet {
+    height: 148px;
+    margin-bottom: 12px;
+    border-radius: 12px;
+    background-color: #2a2422;
+    box-shadow:
+        0 16px 38px rgba(0, 0, 0, 0.55),
+        0 2px 8px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(255, 255, 255, 0.07);
+    position: relative;
+    overflow: hidden;
+}
+
+.iskelet::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg,
+            transparent 20%,
+            rgba(255, 255, 255, 0.07) 50%,
+            transparent 80%);
+    transform: translateX(-100%);
+    animation: iskelet-parla 1.4s ease-in-out infinite;
+}
+
+@keyframes iskelet-parla {
+    to {
+        transform: translateX(100%);
+    }
+}
+
+/* Hareketi rahatsız edici bulan ya da kapatmış kullanıcılar için */
+@media (prefers-reduced-motion: reduce) {
+    .iskelet::after {
+        animation: none;
+        transform: none;
+        background: rgba(255, 255, 255, 0.04);
+    }
+}
+
+.menu-hata {
+    margin: 0;
+    padding: 2rem 1.35rem;
+    border-radius: 12px;
+    background-color: var(--kart);
+    color: var(--soluk);
+    font-size: 16px;
+    text-align: center;
+}
+
 /* ---- Kategoriler -------------------------------------------------- */
 .kategori {
     margin-bottom: 12px;
